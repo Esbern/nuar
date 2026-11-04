@@ -13,10 +13,10 @@ from .tables import SUPPORTED_VERSION, load
 
 DEFAULTS = {"year": 2027, "n_level_scope": "Høstår", "manure_type": "Svinegylle",
             "irrigated": False, "lowland": None}
-REQUIRED = ("grid", "jb", "c_horizon", "crop", "cover",
+REQUIRED = ("jb", "c_horizon", "crop", "cover",
             "prev_crop", "prev_cover", "prev2_crop", "prev2_cover")
-# retention_pct is required too, but --fetch-retention can fill it in, so it
-# is checked separately, after that step runs.
+# grid and retention_pct are required too, but --fetch-grid/--fetch-retention
+# can fill them in, so they are checked separately, after those steps run.
 FLAGS = ("irrigated", "early_sowing", "intermediate_crop", "precision")
 TRUE = {"1", "true", "ja", "yes", "y"}
 
@@ -81,25 +81,33 @@ def run(args):
         print(f"warning: workbook is v{t.version}, the port mirrors v{SUPPORTED_VERSION}. "
               "Use --engine excel, or rerun tests/compare.py first.", file=sys.stderr)
     df = read_points(args.input)
-    if args.fetch_retention:
+    if args.fetch_retention or args.fetch_grid:
         import geopandas as gpd
-        from .retention import join_retention
         if not isinstance(df, gpd.GeoDataFrame) or df.geometry.isna().all():
-            sys.exit("--fetch-retention needs point geometry: an x/y column pair "
-                      "in the csv, or a gpkg/shp/geo-parquet input")
+            sys.exit("--fetch-retention/--fetch-grid need point geometry: an x/y "
+                      "column pair in the csv, or a gpkg/shp/geo-parquet input")
+    if args.fetch_retention:
+        from .retention import join_retention
         joined = join_retention(df)
         df["retention_pct"] = joined["retention_pct"].to_numpy()
         missing_ret = df["retention_pct"].isna().sum()
         if missing_ret:
             print(f"warning: {missing_ret} point(s) got no retention value (outside "
                   "the layer, or on a cell boundary) and will be blank", file=sys.stderr)
+    if args.fetch_grid:
+        from .grid import grid_for_points
+        joined = grid_for_points(df)
+        df["grid"] = joined["grid"].to_numpy()
+        missing_grid = df["grid"].isna().sum()
+        if missing_grid:
+            print(f"warning: {missing_grid} point(s) fell outside the 609-cell grid "
+                  "(outside Denmark) and got no grid id", file=sys.stderr)
     missing = [c for c in REQUIRED if c not in df.columns]
-    if "retention_pct" not in df.columns:
-        missing.append("retention_pct")
+    for col, flag in (("retention_pct", "--fetch-retention"), ("grid", "--fetch-grid")):
+        if col not in df.columns:
+            missing.append(f"{col} (or pass {flag} with point geometry)")
     if missing:
-        sys.exit(f"missing columns: {', '.join(missing)}"
-                  + ("" if args.fetch_retention else " (or pass --fetch-retention "
-                     "with point geometry to fill retention_pct automatically)"))
+        sys.exit(f"missing columns: {', '.join(missing)}")
     if "ammonium_pct" in df.columns and df["ammonium_pct"].notna().any():
         print("warning: ammonium_pct is set. The workbook does not change the organic share "
               "with it, so mineral + organic need not add up to total N. See docs.", file=sys.stderr)
@@ -144,6 +152,10 @@ def main():
                    help="fill retention_pct from the national UMR retention layer "
                         "(geodata.fvm.dk WFS); needs point geometry (x/y columns, or "
                         "gpkg/shp/geo-parquet input)")
+    r.add_argument("--fetch-grid", action="store_true",
+                   help="fill grid (the DMI 10 km climate cell id) from each point's "
+                        "own coordinates; needs point geometry, like --fetch-retention. "
+                        "See nuar/grid.py for how the id is derived")
     args = ap.parse_args()
     run(args)
 

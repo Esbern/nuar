@@ -1,4 +1,7 @@
-data/
+data/*
+# except the DMI-published grid, which is small, public and safe to vendor
+# (see data/dmi_grid/SOURCE.md) -- unlike data/tables.pkl, SEGES's workbook
+!data/dmi_grid/
 tests/oracle_*.pkl
 __pycache__/
 *.pyc

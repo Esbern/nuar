@@ -21,7 +21,15 @@ class NotComputable(Exception):
 
 
 def _blank(v):
-    return v is None or v == ""
+    if v is None or v == "":
+        return True
+    return isinstance(v, float) and v != v  # NaN, e.g. a pandas-missing numeric
+
+
+def _missing(name, v):
+    if _blank(v):
+        raise TypeError(f"{name} is missing")
+    return v
 
 
 def _nz(v):
@@ -58,7 +66,7 @@ def _site(site, t: Tables):
     amm = site.get("ammonium_pct")
     s["ammonium"] = ammonium_base if _blank(amm) else amm                         # O8
     s["all_years"] = site.get("n_level_scope") == "Alle 3 år"                     # L5
-    s["retention"] = site["retention_pct"]
+    s["retention"] = _missing("retention_pct", site["retention_pct"])
     s["tau"] = p["C60"] * (site["year"] - 1991)                                   # EO
     s["n_topsoil"] = t.vl("SoilidTab", s["tj"], 9)                                # CW
     s["clay"] = t.vl("SoilidTab", s["tj"], 3)                                     # DW

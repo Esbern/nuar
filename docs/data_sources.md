@@ -14,7 +14,7 @@ five inputs are still unconfirmed leads, not a tested pipeline.
 | `jb`, soil class 0–25 cm | Jordbundstypekort (Tekstur2014 or a newer version) | Danmarks Miljøportal / Landbrugsstyrelsen | low–medium |
 | `c_horizon`, subsoil | Danmarks digitale jordartskort | GEUS | medium |
 | `lowland` | Lavbundskort | Danmarks Miljøportal (MiljøGIS, layer "Kulstof 2022" or DJF_LAVBUND) | medium |
-| `grid`, DMI climate grid | Climate Grid Denmark | DMI | low, but **low-stakes** — see below |
+| `grid`, DMI climate grid | DKN 10 km grid (`dmidk/Climate-Data-Grid-Map`) | **found** — DMI's own GitHub, vendored in this repo | confirmed (crosswalk inferred, strongly evidenced) |
 | `crop`, `cover` | Markblokke + Fællesskema afgrødekort | Landbrugsstyrelsen (now under SGAV) | medium |
 
 None of these are confirmed as bulk, no-login downloads. Treat every link
@@ -126,28 +126,56 @@ Diluvialsand, Ferskvandssand, Yoldia sand — geological, not agronomic, classes
 **Confirm:** whether this layer distinguishes minerogen vs. organogen lowland,
 since NUAR needs that split, not just "lowland yes/no".
 
-## Climate grid
+## Climate grid — found and wired in
 
-- **No shapefile download was confirmed.** DMI's Klimaatlas is on Zenodo as a
-  1 km GeoTIFF/NetCDF grid: [Zenodo v2025a](https://zenodo.org/records/17491764).
-  That is NUAR's climate PCA input grid (the one you already use via
-  `~/dev/klimaatlas-climate-pca`), but it's **1 km**, not the 10 km
-  `grid` field NUAR's `NUAR-regneark!D5` wants.
-- NUAR's own 10 km grid is documented in DMI's "Climate Grid Denmark"
-  technical report: [dmi.dk/.../tr12-10.pdf](https://www.dmi.dk/fileadmin/Rapporter/TR/tr12-10.pdf).
-  It describes 609 cells (IDs 10001–10609, matching the workbook's `GridTab`
-  exactly) plus 178 20×20 km cells. The report states non-commercial
-  research/educational use only — check whether that covers a thesis, and
-  whether redistribution (e.g. committing cell geometry to this repo) is
-  allowed.
-- An R package, `dmir` ([manual](https://ldalby.r-universe.dev/dmir/doc/manual.html)),
-  ships a `grid_10km` dataset described as "Det Danske Kvadratnet" at 10 km,
-  and a `dmi_get_grid()` function (needs a DMI API key). This is the most
-  promising lead for actual cell geometry — worth checking even though it's R,
-  not Python; the shapefile/data object itself could be reused directly.
+**Esbern found the right DMI documentation page** (`dmi.dk/friedata/.../parameters-for-10x10km-20x20km-municipality-and-country`),
+which led to DMI's own public GitHub org (`dmidk`) and a real, georeferenced
+609-cell grid: [`dmidk/Climate-Data-Grid-Map`](https://github.com/dmidk/Climate-Data-Grid-Map),
+vendored here as `data/dmi_grid/dkn_10km.geojson`.
 
-**This is still the weakest-confirmed item**, but it matters much less than it
-looks like it should — measured directly against the Python port, not
+**The catch:** that grid uses DMI's own current naming
+(`DKN_10km_ETRS89`, cell IDs like `10km_605_65` = northing/10 km,
+easting/10 km) — not the legacy sequential `10001`–`10609` IDs NUAR's
+`GridTab` uses. There's no published crosswalk between the two, so one was
+inferred in `nuar/grid.py`: sort the 609 real cells by (easting ascending,
+then northing descending within each column) and number them
+`10001`..`10609` in that order. This was checked three independent ways, all
+of which matched:
+
+- all 609 cells land one-to-one, no gaps;
+- the resulting 5 Georegion groups land exactly on their named areas —
+  e.g. region 1 "Thy" at lon 8.10–9.08° / lat 56.53–57.16°, which *is* the
+  Thy peninsula;
+- Bornholm (the only geographically isolated cluster, lon > 14.5°) lands at
+  IDs 10597–10609 — matching the separate inset box in the workbook's own
+  `Klimagrid` sheet picture;
+- one column was checked cell-by-cell against IDs read off that same
+  picture: 18 consecutive cells, 10014–10031, matched exactly, digit for
+  digit.
+
+Treat this as strongly evidenced (the Bornholm and 18-cell matches are hard
+to get by chance), not as something SEGES or DMI has officially confirmed.
+
+**Wired into the CLI**, no manual lookup needed:
+
+```bash
+mamba run -n nuar python -m nuar run points.csv -o result.csv --fetch-grid
+```
+
+Verified end to end on real coordinates: a point derived from the DMI grid's
+own Thy-region cell centroid came back `grid=10055`, region 1 (Thy) — and a
+point from the Bornholm cluster came back `grid=10600`, region 5 — both
+cross-checked directly against `GridTab`.
+
+**One real bug found and fixed along the way:** a missing `retention_pct`
+(which `--fetch-retention` can legitimately leave blank — the retention layer
+only covers farmland, so a climate-grid-cell centroid landing in a forest,
+lake or town gets no value) crashed the Python port instead of reporting a
+clean status. Fixed in `nuar/model.py` (`_blank()` now also catches NaN;
+`retention_pct` is validated where the site is built, alongside `jb` and
+`grid`, instead of only failing later inside the arithmetic).
+
+**How much this still matters** — measured against the Python port, not
 guessed. In the formulas, `grid` feeds exactly two things:
 
 1. **Georegion** (1 of 5: Thy, Nordjylland, Vestjylland, Midtjylland,
@@ -220,17 +248,19 @@ passes through as overrides — no grid or region needed to use them.
 
 ## Suggested order of attack
 
-1. **Retention — done.** `--fetch-retention` fetches and joins it live; no
-   further acquisition needed.
+1. **Retention and climate grid — done.** `--fetch-retention` and
+   `--fetch-grid` both fetch and join live from real coordinates; no manual
+   lookup needed for either.
 2. **Markblokke + afgrødekort** next — this fixes which points exist and
-   what `crop`/`cover` sequences are real, before spending time on the other
-   layers for points that might not matter.
+   what `crop`/`cover` sequences are real, before spending time on the
+   remaining layers for points that might not matter.
 3. **Soil (JB), subsoil and lowland** together, since Danmarks Miljøportal's
    Arealdata looks likely to host all three.
-4. **Climate grid last, and don't over-invest in it.** The sensitivity check
-   above shows the region it determines barely moves leaching (≈1 %); a rough
-   assignment is enough unless you also get real drainage/percolation data to
-   feed in via the runoff overrides.
+
+If real drainage/percolation data becomes available later (not reconstructed
+from klimanormal — see the climate-grid section above for why), it plugs in
+directly via `runoff_summer`/`runoff_winter`/`runoff_winter_prev`, already
+wired as overrides, no grid or region needed.
 
 Once each layer is actually in hand (format, attribute names, projection),
 I can help write the join from point geometry to each required NUAR column —
