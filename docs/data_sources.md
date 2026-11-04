@@ -2,48 +2,64 @@
 
 What to get for each NUAR input, where to look, and what's uncertain. Checked
 by web search on 4 Nov 2026; portals and dataset names change, so confirm
-before relying on anything here. Nothing below was downloaded or tested
-against real data — this is a map of where to look, not a verified pipeline.
+before relying on anything here. **Retention** is now a verified, working
+pipeline (fetched, joined and run through the model end to end); the other
+five inputs are still unconfirmed leads, not a tested pipeline.
 
 ## Summary
 
 | NUAR input | Dataset | Likely source | Confidence |
 |---|---|---|---|
-| `retention_pct` | Kvælstofretentionskort | GEUS / Aarhus University (DCE), for SGAV | medium |
+| `retention_pct` | Kvælstofretention UMR 2027 | **found** — `geodata.fvm.dk`, public WFS, no login | confirmed |
 | `jb`, soil class 0–25 cm | Jordbundstypekort (Tekstur2014 or a newer version) | Danmarks Miljøportal / Landbrugsstyrelsen | low–medium |
 | `c_horizon`, subsoil | Danmarks digitale jordartskort | GEUS | medium |
 | `lowland` | Lavbundskort | Danmarks Miljøportal (MiljøGIS, layer "Kulstof 2022" or DJF_LAVBUND) | medium |
-| `grid`, DMI climate grid | Climate Grid Denmark / Klimaatlas | DMI | low |
+| `grid`, DMI climate grid | Climate Grid Denmark | DMI | low, but **low-stakes** — see below |
 | `crop`, `cover` | Markblokke + Fællesskema afgrødekort | Landbrugsstyrelsen (now under SGAV) | medium |
 
 None of these are confirmed as bulk, no-login downloads. Treat every link
 below as a starting point to check, not a working URL.
 
-## Retention — you're right that you need it
+## Retention — found and wired in
 
-`retention_pct` is the one NUAR input this project's code cannot get from
-elsewhere. The spreadsheet does not calculate it; it only uses whatever number
-you give it, in `I5` of `NUAR-regneark`, to scale leaching down to discharge at
-the coast. Without a real value it is silently wrong, not blank: the sheet
-treats a missing retention as 0, i.e. full discharge, with no error.
+`retention_pct` is the one NUAR input the workbook cannot supply itself: the
+spreadsheet doesn't calculate it, it only uses whatever number you give it
+(`I5` in `NUAR-regneark`) to scale leaching down to discharge at the coast.
+Without a real value it's silently wrong, not blank — a missing retention
+reads as 0, i.e. full discharge, with no error.
 
-- The current version appears to be a 2026 update, documented in a GEUS/DCE
-  report dated 27 May 2026: [NKM2026_27maj2026.pdf](https://data.geus.dk/pure-pdf/NKM2026_27maj2026.pdf).
-  It describes an update to the national nitrogen model used for retention.
-- Danish agricultural press reports the map was made public and resolves close
-  to field level: [landbrugsavisen.dk](https://landbrugsavisen.dk/nyt-kvaelstofskort-tilgaengeligt-alle-det-er-ikke-en-facitliste).
-  A related article is more critical of using it at farm level:
-  [landbrugsavisen.dk](https://landbrugsavisen.dk/seniorforsker-retentionskort-uegnede-til-at-vurdere-n-tab-paa-bedriftsniveau-7512).
-- Background and the older (2015/2020) version's methods:
-  [N2020_82.pdf](https://dce.au.dk/fileadmin/dce.au.dk/Udgivelser/Notater_2020/N2020_82.pdf).
+**Esbern found the right layer:** the official UMR retention map, served live
+and with no login needed:
 
-**I could not find a direct download link.** Next step: check
-[data.geus.dk](https://data.geus.dk) and [dce.au.dk](https://dce.au.dk)
-publication pages directly, starting from the 2026 report's authors and
-project page, or email GEUS/DCE — academic requests for a named thesis project
-are usually answered. SEGES's own NUAR documentation (the PDF in `/mnt/d/NUAR`)
-may also name the exact retention layer they expect, since the spreadsheet
-itself doesn't say which version.
+```
+URL:   https://geodata.fvm.dk/geoserver/ows
+Layer: Udledningsbaseret_mark_regulering:Kvaelstofretention_UMR_2027
+```
+
+Confirmed by fetching it directly (4 Nov 2026):
+
+- **96,377 polygons**, EPSG:25832, each with `RetTot` (retention %, 0–100) and
+  `KystvandID` (the coastal-water catchment it belongs to).
+- **Not field-resolution.** The finest polygon is one 100×100 m grid cell,
+  but most are much larger — up to ~80 km² in a sample check, and only about
+  10 distinct `RetTot` values turned up in 500 features. Retention is modelled
+  per catchment / catchment sub-area and is piecewise constant across it, not
+  a smoothly varying surface. Don't expect it to distinguish two points on
+  the same farm.
+- No API key, no rate limit hit during testing.
+
+**This project now fetches it automatically.** `nuar/retention.py` wraps the
+WFS call and a `geopandas.sjoin`; the CLI exposes it as
+`--fetch-retention`, which needs point geometry (an `x`/`y` column pair in a
+csv, EPSG:25832 or lon/lat, or a gpkg/shp/geo-parquet input):
+
+```bash
+mamba run -n nuar python -m nuar run points.csv -o result.csv --fetch-retention
+```
+
+A point exactly on a 100 m cell edge, or outside the layer (open water, just
+past the coast), comes back with no retention value; the CLI warns with a
+count when that happens.
 
 ## Soil class (JB number, topsoil 0–25 cm)
 
@@ -130,11 +146,53 @@ since NUAR needs that split, not just "lowland yes/no".
   promising lead for actual cell geometry — worth checking even though it's R,
   not Python; the shapefile/data object itself could be reused directly.
 
-**This is the weakest-confirmed item.** Options to pursue: (a) the `dmir`
-package's bundled grid, (b) requesting the cell geometry from DMI directly
-citing the tr12-10 report, or (c) reconstructing the 10 km cells from a known
-origin and the IDs in tr12-10 if the projection and origin are documented
-there — I haven't read that report's content, only its existence.
+**This is still the weakest-confirmed item**, but it matters much less than it
+looks like it should — measured directly against the Python port, not
+guessed. In the formulas, `grid` feeds exactly two things:
+
+1. **Georegion** (1 of 5: Thy, Nordjylland, Vestjylland, Midtjylland,
+   Østdanmark) → part of `Typejord` → the topsoil total-N and clay %
+   defaults (`SoilidTab`).
+2. **Default drainage/percolation** for two periods, looked up from `AfstrDat`
+   (609 grids × ~56 soil types × 8 crop drainage classes).
+
+I tested both effects by holding soil and crop fixed (JB 6, moraine clay,
+spring barley with a catch crop, 125 kg N) and varying only `grid`, across all
+609 grid cells, using the Python port:
+
+| What varies | Leaching range | Spread (stdev) |
+|---|---|---|
+| Everything `grid` touches (region + default runoff) | 14.1 – 36.9 kg N/ha | 4.65 |
+| Only the region effect (runoff pinned to one fixed value via `runoff_summer`/`runoff_winter`/`runoff_winter_prev`) | 27.1 – 28.3 kg N/ha | **0.35** |
+
+**Getting the region right barely matters (≈1 % of leaching) — getting
+runoff right is almost the whole effect of `grid`.** So the DMI 10 km grid ID
+itself isn't really the thing worth chasing; real local drainage/percolation
+estimates are.
+
+**On reusing the signatur climate-PCA data (`~/dev/klimaatlas-climate-pca`,
+`/mnt/d/klimanormal`) for this:** it's a *different* DMI product — "Klimaatlas"
+model climatology at 1 km (RCP4.5, bias-corrected, 1981–2010), not the
+"Climate Grid Denmark" 10 km grid NUAR's `D5` expects — so there's no ready ID
+crosswalk between them. But it does carry seasonal precipitation and potential
+evaporation (Makkink), which is in principle what drainage is built from.
+**Don't substitute it directly**, though: `AfstrDat`'s columns are
+`Perc_Apri_aug_mm` / `Perc_sept_mar_mm` — the *output* of AU's own calibrated
+percolation/water-balance model (soil-aware, already net of real
+evapotranspiration), not raw precipitation minus potential ET. A DIY
+precip-minus-PET estimate from klimanormal would be a materially different,
+unvalidated method standing in for a calibrated one, and the period split
+(Apr–Aug / Sep–Mar) doesn't line up with klimanormal's seasons (DJF/MAM/JJA/SON)
+either, so there's re-aggregation to do either way.
+
+**What I'd actually do:** since the region effect is small, don't spend time
+reconstructing the DMI 10 km grid precisely — a rough Georegion assignment
+(even picking the right one of 5 regions by eye from a Denmark map) is good
+enough, confirmed above at ≈1 % of leaching. If better drainage data than
+`AfstrDat`'s lookup becomes available later (e.g. from AU directly, not
+reverse-engineered from klimanormal), feed it straight in via
+`runoff_summer`/`runoff_winter`/`runoff_winter_prev`, which the CLI already
+passes through as overrides — no grid or region needed to use them.
 
 ## Crops (markblok + afgrøde)
 
@@ -162,17 +220,17 @@ there — I haven't read that report's content, only its existence.
 
 ## Suggested order of attack
 
-1. **Markblokke + afgrødekort** first — this fixes which points exist and
+1. **Retention — done.** `--fetch-retention` fetches and joins it live; no
+   further acquisition needed.
+2. **Markblokke + afgrødekort** next — this fixes which points exist and
    what `crop`/`cover` sequences are real, before spending time on the other
-   four layers for points that might not matter.
-2. **Climate grid** next, since it's the least confirmed and blocks `grid`
-   for every point; the `dmir` R package lead is worth 15 minutes before
-   trying anything else.
+   layers for points that might not matter.
 3. **Soil (JB), subsoil and lowland** together, since Danmarks Miljøportal's
    Arealdata looks likely to host all three.
-4. **Retention** last is fine functionally (nothing else depends on it), but
-   email GEUS/DCE early since academic data requests can take a while to
-   answer.
+4. **Climate grid last, and don't over-invest in it.** The sensitivity check
+   above shows the region it determines barely moves leaching (≈1 %); a rough
+   assignment is enough unless you also get real drainage/percolation data to
+   feed in via the runoff overrides.
 
 Once each layer is actually in hand (format, attribute names, projection),
 I can help write the join from point geometry to each required NUAR column —

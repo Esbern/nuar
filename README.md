@@ -18,6 +18,9 @@ The workbook is not included. The default path is
 
 ```bash
 mamba run -n nuar python -m nuar run examples/points_template.csv -o result.csv
+
+# or, with real coordinates and retention fetched automatically:
+mamba run -n nuar python -m nuar run examples/points_fetch_retention.csv -o result.csv --fetch-retention
 ```
 
 | Option | Effect |
@@ -26,9 +29,13 @@ mamba run -n nuar python -m nuar run examples/points_template.csv -o result.csv
 | `--engine excel` | real Excel through WSL, about 3 sites/s (up to 5 crop rows per site); needs Excel on Windows |
 | `--solve` | also find the spring mineral N that meets a target discharge |
 | `--target 12` | target in kg N/ha (default: the spring-barley reference) |
+| `--fetch-retention` | fill `retention_pct` from the national UMR retention layer (live WFS, no login); needs point geometry — an `x`/`y` column pair in a csv, or a gpkg/shp/geo-parquet input |
 
 Input can be csv, parquet, gpkg or shp. The Excel engine works on a temporary
 copy, writes only to the unlocked input cells and never saves.
+
+See [docs/data_sources.md](docs/data_sources.md) for where to get each of the
+other required inputs (soil class, subsoil, lowland, climate grid, crop/cover).
 
 ## Check against Excel
 
