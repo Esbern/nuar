@@ -1,0 +1,5 @@
+id,grid,jb,c_horizon,lowland,irrigated,retention_pct,year,crop,cover,catch_crop_date,prev_crop,prev_cover,prev2_crop,prev2_cover,min_spring,manure_spring
+A_ref_barley,10315,6,Moræneler,,0,70,2027,1,968,20. aug.,1,968,1,968,125,
+B_winter_wheat,10315,6,Moræneler,,0,70,2027,11,4000,,1,11,1,968,,
+C_maize_sand,10122,3,Diluvialsand,,1,50,2027,216,4000,,216,4000,216,968,60,170
+D_invalid_soil,10122,6,Moræneler,,0,50,2027,1,968,,1,968,1,968,,
