@@ -11,8 +11,18 @@ Read [docs/NUAR_explained.md](docs/NUAR_explained.md) first.
 mamba create -n nuar -c conda-forge python=3.12 openpyxl pandas geopandas pyogrio pytest
 ```
 
-The workbook is not included. The default path is
-`/mnt/d/NUAR/Copy of NUAR-regneark (SEGES).xlsx`; use `--workbook` for another.
+The workbook is not included. Export its tables once, and the Python engine
+runs without it:
+
+```bash
+mamba run -n nuar python -m nuar export-tables "NUAR-regneark (SEGES).xlsx"
+```
+
+This writes `data/tables/tables.json` (everything the model reads) and one CSV
+per table in `data/tables/csv/`, for reading. Like the cache, the export is
+git-ignored: the tables are SEGES's and are not redistributed here. Without an
+export, the workbook is read from `--workbook` (default
+`/mnt/d/NUAR/Copy of NUAR-regneark (SEGES).xlsx`); the Excel engine always needs it.
 
 ## Run
 

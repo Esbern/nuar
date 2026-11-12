@@ -9,7 +9,7 @@ import pandas as pd
 
 from .excel import OUTPUTS, ROW_CELLS, SITE_CELLS, SLOTS, run_excel
 from .model import compute, solve_mineral_n
-from .tables import SUPPORTED_VERSION, load
+from .tables import DEFAULT_EXPORT, SUPPORTED_VERSION, build, export, load
 
 DEFAULTS = {"year": 2027, "n_level_scope": "Høstår", "manure_type": "Svinegylle",
             "irrigated": False, "lowland": None}
@@ -75,8 +75,25 @@ def _excel_batches(pairs):
             yield members[j:j + SLOTS]
 
 
+def tables_for(args):
+    """The exported tables if there are any (no workbook needed), else the workbook."""
+    folder = Path(args.tables) if args.tables else DEFAULT_EXPORT
+    if args.engine == "python" and (folder / "tables.json").exists() and not args.use_workbook:
+        return load(folder)
+    if not Path(args.workbook).exists():
+        sys.exit(f"no exported tables in {folder} and no workbook at {args.workbook}; "
+                 "run: python -m nuar export-tables <workbook>")
+    return load(args.workbook)
+
+
+def export_tables(args):
+    t = build(Path(args.workbook))
+    path = export(t, Path(args.output), source=Path(args.workbook).name)
+    print(f"NUAR v{t.version}: {len(t.tab)} tables -> {path} (and csv/ next to it)")
+
+
 def run(args):
-    t = load(args.workbook)
+    t = tables_for(args)
     if t.version != SUPPORTED_VERSION:
         print(f"warning: workbook is v{t.version}, the port mirrors v{SUPPORTED_VERSION}. "
               "Use --engine excel, or rerun tests/compare.py first.", file=sys.stderr)
@@ -144,7 +161,11 @@ def main():
     r = sub.add_parser("run", help="compute leaching and discharge for a point table")
     r.add_argument("input", help="csv, parquet, gpkg or shp with one row per point and crop")
     r.add_argument("-o", "--output", required=True)
-    r.add_argument("--workbook", default="/mnt/d/NUAR/Copy of NUAR-regneark (SEGES).xlsx")
+    r.add_argument("--workbook", default="/mnt/d/NUAR/Copy of NUAR-regneark (SEGES).xlsx",
+                   help="the SEGES workbook; needed for --engine excel, or when there is no export")
+    r.add_argument("--tables", help=f"exported tables (default {DEFAULT_EXPORT}); used by the python "
+                                    "engine instead of the workbook when present")
+    r.add_argument("--use-workbook", action="store_true", help="read the workbook even if an export exists")
     r.add_argument("--engine", choices=("python", "excel"), default="python")
     r.add_argument("--solve", action="store_true",
                    help="also find the spring mineral N that meets a target discharge")
@@ -156,8 +177,15 @@ def main():
                    help="fill grid (the DMI 10 km climate cell id) from each point's "
                         "own coordinates; needs point geometry, like --fetch-retention. "
                         "See nuar/grid.py for how the id is derived")
+    x = sub.add_parser("export-tables", help="write the workbook's tables to data/tables, so the "
+                                             "python engine runs without the workbook")
+    x.add_argument("workbook")
+    x.add_argument("-o", "--output", default=str(DEFAULT_EXPORT))
     args = ap.parse_args()
-    run(args)
+    if args.cmd == "export-tables":
+        export_tables(args)
+    else:
+        run(args)
 
 
 if __name__ == "__main__":
